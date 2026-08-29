@@ -6,7 +6,7 @@ from tkinter import ttk, filedialog
 import threading
 import os
 from datetime import date
-from PIL import Image
+from PIL import Image, ImageTk
 
 
 def _fmt_cm(v):
@@ -22,6 +22,8 @@ class SchedaEsporta(ttk.Frame):
         self._path_in = None
         self._img_info = None   # (width, height) dell'immagine caricata
         self._scenario_var = tk.StringVar()
+        self._tk_img = None       # riferimento PhotoImage (evita GC)
+        self._pil_preview = None  # immagine PIL corrente per il canvas
         self._crea_layout()
 
     # ------------------------------------------------------------------
@@ -135,8 +137,57 @@ class SchedaEsporta(ttk.Frame):
                                       font=("sans-serif", 10, "bold"))
         self._btn_esporta.grid(row=row, column=0, sticky="ew", padx=10, pady=(8, 12))
 
+        # --- Pannello destro: anteprima ---
+        self._canvas = tk.Canvas(self, bg=self._colore("sfondo_app"),
+                                 highlightthickness=0)
+        self._canvas.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
+        self._canvas.bind("<Configure>", self._on_canvas_resize)
+
+        self._lbl_placeholder = tk.Label(
+            self._canvas, text="Carica un'immagine\nper vedere l'anteprima",
+            bg=self._colore("sfondo_app"), fg=self._colore("attenuato"),
+            justify="center")
+        self._canvas.create_window(0, 0, anchor="nw", window=self._lbl_placeholder,
+                                   tags="placeholder")
+
         # Popola subito i dettagli con lo scenario di default
         self._aggiorna_dettagli()
+
+    # ------------------------------------------------------------------
+    # Anteprima
+    # ------------------------------------------------------------------
+
+    def _mostra_anteprima(self, pil_img):
+        """Visualizza pil_img nel canvas, scalata per adattarsi."""
+        cw = self._canvas.winfo_width()
+        ch = self._canvas.winfo_height()
+        if cw < 10 or ch < 10:
+            # Canvas non ancora renderizzato — riprova al prossimo ciclo
+            self.after(50, lambda: self._mostra_anteprima(pil_img))
+            return
+
+        # Nasconde placeholder
+        self._canvas.itemconfigure("placeholder", state="hidden")
+
+        # Scala mantenendo le proporzioni
+        iw, ih = pil_img.size
+        scala = min(cw / iw, ch / ih, 1.0)
+        nw, nh = max(1, int(iw * scala)), max(1, int(ih * scala))
+        img_rid = pil_img.resize((nw, nh), Image.LANCZOS)
+
+        self._tk_img = ImageTk.PhotoImage(img_rid)
+        self._canvas.delete("preview")
+        self._canvas.create_image(cw // 2, ch // 2, anchor="center",
+                                  image=self._tk_img, tags="preview")
+
+    def _on_canvas_resize(self, event):
+        """Ridisegna l'anteprima quando il canvas cambia dimensione."""
+        if self._pil_preview is not None:
+            self._mostra_anteprima(self._pil_preview)
+        else:
+            # Riposiziona il placeholder al centro
+            self._canvas.coords("placeholder", event.width // 2, event.height // 2)
+            self._canvas.itemconfigure("placeholder", anchor="center", state="normal")
 
     # ------------------------------------------------------------------
     # Caricamento
@@ -151,18 +202,19 @@ class SchedaEsporta(ttk.Frame):
             return
 
         try:
-            img = Image.open(path)
+            img = Image.open(path).convert("RGB")
             self._img_info = img.size  # (width, height)
-            img.close()
         except Exception as e:
             self._app.imposta_stato(f"Impossibile aprire: {e}", "errore")
             return
 
         self._path_in = path
+        self._pil_preview = img
         nome = os.path.basename(path)
         w, h = self._img_info
         self._lbl_img.config(text=f"{nome}\n{w}×{h} px", fg=self._colore("testo"))
         self._app.imposta_stato(f"Caricata: {nome} ({w}×{h} px)")
+        self._mostra_anteprima(img)
         self._aggiorna_dettagli()
 
     # ------------------------------------------------------------------
@@ -315,3 +367,10 @@ class SchedaEsporta(ttk.Frame):
         w, h = info["px"]
         self._app.imposta_stato(
             f"Esportato: {info['file']} ({w}×{h} px, {info['dpi']} dpi, {info['profilo']})")
+        # Mostra il TIFF esportato nell'anteprima
+        try:
+            img_risultato = Image.open(info["file"]).convert("RGB")
+            self._pil_preview = img_risultato
+            self._mostra_anteprima(img_risultato)
+        except Exception:
+            pass
