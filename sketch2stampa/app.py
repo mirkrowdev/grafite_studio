@@ -7,13 +7,18 @@ from tkinter import ttk
 import sys
 import base64
 import io
+import logging
 
 from PIL import Image, ImageTk
 import numpy as np
 
+import log_setup
 from risorse import LOGO_HEADER_B64, LOGO_WATERMARK_B64
 from scheda_normalizza import SchedaNormalizza
 from scheda_esporta import SchedaEsporta
+
+log_setup.configura()
+_log = logging.getLogger("grafite.app")
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +302,7 @@ class App(tk.Tk):
         self._lbl_stato.pack(side="left", fill="both", expand=True)
 
     def imposta_stato(self, msg, tipo="info"):
-        """Aggiorna la barra di stato.
+        """Aggiorna la barra di stato e scrive nel log.
 
         tipo: "info" | "errore" | "avviso"
         """
@@ -307,7 +312,19 @@ class App(tk.Tk):
             "avviso": "#F2B48A",   # arancione tenue
         }
         fg = colori_testo.get(tipo, COLORI["testo_sec"])
-        self._lbl_stato.config(text=msg, fg=fg)
+
+        # Log sul file
+        if tipo == "errore":
+            _log.error(msg)
+            testo_barra = f"{msg}  —  log: {log_setup.percorso_log()}"
+        elif tipo == "avviso":
+            _log.warning(msg)
+            testo_barra = msg
+        else:
+            _log.info(msg)
+            testo_barra = msg
+
+        self._lbl_stato.config(text=testo_barra, fg=fg)
 
 
 # ---------------------------------------------------------------------------

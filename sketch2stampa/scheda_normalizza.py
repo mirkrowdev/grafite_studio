@@ -4,10 +4,13 @@ Scheda Normalizza — interfaccia per la fase 1 (correzione prospettica + normal
 import tkinter as tk
 from tkinter import ttk, filedialog
 import threading
+import logging
 import os
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
+
+_log = logging.getLogger("grafite.normalizza")
 
 
 class SchedaNormalizza(ttk.Frame):
@@ -467,6 +470,7 @@ class SchedaNormalizza(ttk.Frame):
                 result = normalizza_array(img, angoli, clip=clip, forza_wb=forza_wb)
                 self.after(0, lambda: self._aggiorna_canvas_preview(result))
             except Exception as e:
+                _log.exception("Errore nel ricalcolo anteprima")
                 self.after(0, lambda: self._app.imposta_stato(f"Errore anteprima: {e}", "errore"))
 
         threading.Thread(target=lavora, daemon=True).start()
@@ -526,6 +530,7 @@ class SchedaNormalizza(ttk.Frame):
                 h, w = result.shape[:2]
                 self.after(0, lambda: self._fine_salvataggio(path_out, w, h))
             except Exception as e:
+                _log.exception("Errore nel salvataggio")
                 self.after(0, lambda: self._app.imposta_stato(f"Errore: {e}", "errore"))
                 self.after(0, lambda: self._btn_salva.config(state="normal"))
 

@@ -4,9 +4,12 @@ Scheda Esporta — interfaccia per la fase 4 (export per scenario di stampa).
 import tkinter as tk
 from tkinter import ttk, filedialog
 import threading
+import logging
 import os
 from datetime import date
 from PIL import Image, ImageTk
+
+_log = logging.getLogger("grafite.esporta")
 
 
 def _fmt_cm(v):
@@ -277,6 +280,7 @@ class SchedaEsporta(ttk.Frame):
             img = Image.open(path).convert("RGB")
             self._img_info = img.size  # (width, height)
         except Exception as e:
+            _log.exception("Impossibile aprire l'immagine sorgente")
             self._app.imposta_stato(f"Impossibile aprire: {e}", "errore")
             return
 
@@ -491,6 +495,7 @@ class SchedaEsporta(ttk.Frame):
                 info = esporta(path_in, path_out, scenario, override=override)
                 self.after(0, lambda: self._fine_esportazione(info))
             except Exception as e:
+                _log.exception("Errore durante l'esportazione")
                 self.after(0, lambda: self._app.imposta_stato(f"Errore esportazione: {e}", "errore"))
                 self.after(0, lambda: self._btn_esporta.config(state="normal"))
 
