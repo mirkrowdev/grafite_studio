@@ -21,9 +21,20 @@ class SchedaEsporta(ttk.Frame):
         self._app = app
         self._path_in = None
         self._img_info = None   # (width, height) dell'immagine caricata
+        self._pil_sorgente = None  # immagine PIL sorgente originale
         self._scenario_var = tk.StringVar()
         self._tk_img = None       # riferimento PhotoImage (evita GC)
         self._pil_preview = None  # immagine PIL corrente per il canvas
+        self._aggiornamento_in_corso = False  # flag anti-ricorsione
+
+        # Variabili editabili per i parametri di export
+        self._var_dpi = tk.StringVar()
+        self._var_larg_cm = tk.StringVar()
+        self._var_alt_cm = tk.StringVar()
+        self._var_profilo = tk.StringVar()
+        self._var_adatta = tk.StringVar()
+        self._var_bordo_cm = tk.StringVar()
+
         self._crea_layout()
 
     # ------------------------------------------------------------------
@@ -96,8 +107,8 @@ class SchedaEsporta(ttk.Frame):
             row=row, column=0, sticky="ew", padx=10, pady=4)
         row += 1
 
-        # 3. Riquadro dettagli scenario
-        tk.Label(pannello, text="DETTAGLI SCENARIO",
+        # 3. Riquadro dettagli scenario (editabili)
+        tk.Label(pannello, text="PARAMETRI EXPORT",
                  bg=self._colore("contenitore"), fg=self._colore("testo_sec"),
                  font=("sans-serif", 8)).grid(row=row, column=0, sticky="w", padx=10, pady=(8, 2))
         row += 1
@@ -109,6 +120,66 @@ class SchedaEsporta(ttk.Frame):
         self._fr_dettagli.grid(row=row, column=0, sticky="ew", padx=10, pady=(0, 6))
         self._fr_dettagli.columnconfigure(0, weight=0)
         self._fr_dettagli.columnconfigure(1, weight=1)
+
+        r = 0
+        lbl_kw = dict(bg=self._colore("superficie"), fg=self._colore("testo_sec"),
+                       anchor="w", padx=8, pady=3)
+        entry_kw = dict(bg=self._colore("contenitore"), fg=self._colore("testo"),
+                        insertbackground=self._colore("testo"),
+                        relief="flat", bd=2, width=10)
+
+        # Larghezza cm
+        tk.Label(self._fr_dettagli, text="Larghezza (cm):", **lbl_kw).grid(row=r, column=0, sticky="w")
+        e_larg = tk.Entry(self._fr_dettagli, textvariable=self._var_larg_cm, **entry_kw)
+        e_larg.grid(row=r, column=1, sticky="ew", padx=(4, 8), pady=2)
+        r += 1
+
+        # Altezza cm
+        tk.Label(self._fr_dettagli, text="Altezza (cm):", **lbl_kw).grid(row=r, column=0, sticky="w")
+        e_alt = tk.Entry(self._fr_dettagli, textvariable=self._var_alt_cm, **entry_kw)
+        e_alt.grid(row=r, column=1, sticky="ew", padx=(4, 8), pady=2)
+        r += 1
+
+        # DPI
+        tk.Label(self._fr_dettagli, text="DPI:", **lbl_kw).grid(row=r, column=0, sticky="w")
+        e_dpi = tk.Entry(self._fr_dettagli, textvariable=self._var_dpi, **entry_kw)
+        e_dpi.grid(row=r, column=1, sticky="ew", padx=(4, 8), pady=2)
+        r += 1
+
+        # Profilo colore
+        tk.Label(self._fr_dettagli, text="Profilo colore:", **lbl_kw).grid(row=r, column=0, sticky="w")
+        combo_profilo = ttk.Combobox(self._fr_dettagli, textvariable=self._var_profilo,
+                                      values=["sRGB", "AdobeRGB"], state="readonly", width=10)
+        combo_profilo.grid(row=r, column=1, sticky="ew", padx=(4, 8), pady=2)
+        r += 1
+
+        # Adattamento
+        tk.Label(self._fr_dettagli, text="Adattamento:", **lbl_kw).grid(row=r, column=0, sticky="w")
+        combo_adatta = ttk.Combobox(self._fr_dettagli, textvariable=self._var_adatta,
+                                     values=["contieni", "copri"], state="readonly", width=10)
+        combo_adatta.grid(row=r, column=1, sticky="ew", padx=(4, 8), pady=2)
+        r += 1
+
+        # Bordo avvolgimento
+        tk.Label(self._fr_dettagli, text="Bordo avvolg. (cm):", **lbl_kw).grid(row=r, column=0, sticky="w")
+        e_bordo = tk.Entry(self._fr_dettagli, textvariable=self._var_bordo_cm, **entry_kw)
+        e_bordo.grid(row=r, column=1, sticky="ew", padx=(4, 8), pady=2)
+        r += 1
+
+        # Pixel finali (label calcolata, non editabile)
+        tk.Label(self._fr_dettagli, text="Pixel finali:", **lbl_kw).grid(row=r, column=0, sticky="w")
+        self._lbl_pixel = tk.Label(self._fr_dettagli, text="—",
+                                    bg=self._colore("superficie"),
+                                    fg=self._colore("primario"),
+                                    anchor="w", padx=4, pady=3)
+        self._lbl_pixel.grid(row=r, column=1, sticky="w")
+        r += 1
+
+        # Trace per aggiornamento live
+        for var in (self._var_dpi, self._var_larg_cm, self._var_alt_cm,
+                    self._var_profilo, self._var_adatta, self._var_bordo_cm):
+            var.trace_add("write", self._on_parametro_cambiato)
+
         row += 1
 
         # Avviso ingrandimento (nascosto di default)
@@ -120,7 +191,8 @@ class SchedaEsporta(ttk.Frame):
                                     bg="#2A1B10", fg="#F2B48A",
                                     wraplength=290, justify="left", padx=8, pady=6)
         self._lbl_avviso.pack(fill="x")
-        # non mostrato per ora
+        self._avviso_row = row
+        row += 1
 
         ttk.Separator(pannello, orient="horizontal").grid(
             row=row, column=0, sticky="ew", padx=10, pady=4)
@@ -209,71 +281,88 @@ class SchedaEsporta(ttk.Frame):
             return
 
         self._path_in = path
+        self._pil_sorgente = img
         self._pil_preview = img
         nome = os.path.basename(path)
         w, h = self._img_info
         self._lbl_img.config(text=f"{nome}\n{w}×{h} px", fg=self._colore("testo"))
         self._app.imposta_stato(f"Caricata: {nome} ({w}×{h} px)")
-        self._mostra_anteprima(img)
-        self._aggiorna_dettagli()
+        self._on_parametro_cambiato()  # genera preview risultato
+
+    # ------------------------------------------------------------------
+    # Lettura parametri correnti
+    # ------------------------------------------------------------------
+
+    def _leggi_parametri(self):
+        """Legge i parametri correnti dai widget editabili. Ritorna None se invalidi."""
+        try:
+            dpi = int(self._var_dpi.get())
+            larg = float(self._var_larg_cm.get())
+            alt = float(self._var_alt_cm.get())
+            profilo = self._var_profilo.get()
+            adatta = self._var_adatta.get()
+            bordo_str = self._var_bordo_cm.get().strip()
+            bordo = float(bordo_str) if bordo_str else 0
+            if dpi <= 0 or larg <= 0 or alt <= 0 or bordo < 0:
+                return None
+            return {
+                "cm": (larg, alt),
+                "dpi": dpi,
+                "profilo": profilo,
+                "adatta": adatta,
+                "bordo_cm": bordo,
+                "sfondo": (255, 255, 255),
+            }
+        except (ValueError, TypeError):
+            return None
 
     # ------------------------------------------------------------------
     # Riquadro dettagli
     # ------------------------------------------------------------------
 
     def _aggiorna_dettagli(self, *_):
+        """Popola i campi editabili dallo scenario selezionato."""
+        self._aggiornamento_in_corso = True
         scenario = self._scenario_var.get()
         cfg = self._SCENARI.get(scenario, {})
 
-        # Pulisci riquadro
-        for widget in self._fr_dettagli.winfo_children():
-            widget.destroy()
-
-        dpi = cfg.get("dpi", "?")
-        cm_l, cm_h = cfg.get("cm", (0, 0))
+        cm_l, cm_h = cfg.get("cm", (20, 30))
+        self._var_larg_cm.set(_fmt_cm(cm_l))
+        self._var_alt_cm.set(_fmt_cm(cm_h))
+        self._var_dpi.set(str(cfg.get("dpi", 300)))
+        self._var_profilo.set(cfg.get("profilo", "sRGB"))
+        self._var_adatta.set(cfg.get("adatta", "contieni"))
         bordo = cfg.get("bordo_cm", 0)
+        self._var_bordo_cm.set(str(bordo) if bordo else "0")
+
+        self._aggiornamento_in_corso = False
+        self._on_parametro_cambiato()
+
+    def _on_parametro_cambiato(self, *_):
+        """Callback: un parametro editabile è cambiato → aggiorna pixel e preview."""
+        if self._aggiornamento_in_corso:
+            return
+
+        params = self._leggi_parametri()
+        if params is None:
+            self._lbl_pixel.config(text="(valori non validi)")
+            return
+
+        cm_l, cm_h = params["cm"]
+        bordo = params["bordo_cm"]
         cm_l_tot = cm_l + bordo * 2
         cm_h_tot = cm_h + bordo * 2
-        profilo = cfg.get("profilo", "?")
-        adatta = cfg.get("adatta", "?")
+        dpi = params["dpi"]
+        adatta = params["adatta"]
 
-        adatta_testo = "margine bianco" if adatta == "contieni" else "ritaglia"
-
-        righe = [
-            ("Misura", f"{_fmt_cm(cm_l_tot)} × {_fmt_cm(cm_h_tot)} cm"),
-            ("DPI", str(dpi)),
-            ("Profilo colore", profilo),
-            ("Adattamento", adatta_testo),
-        ]
-
-        if bordo:
-            righe.append(("Bordo avvolgimento", f"{bordo} cm per lato"))
-
-        # Pixel finali
-        if dpi != "?":
-            W = self._cm_to_px(cm_l_tot, dpi)
-            H = self._cm_to_px(cm_h_tot, dpi)
-            righe.append(("Pixel finali", f"{W} × {H} px"))
-        else:
-            W, H = None, None
-
-        for i, (etichetta, valore) in enumerate(righe):
-            tk.Label(self._fr_dettagli, text=etichetta + ":",
-                     bg=self._colore("superficie"), fg=self._colore("testo_sec"),
-                     anchor="w", padx=8, pady=2).grid(
-                row=i, column=0, sticky="w")
-            is_px = etichetta == "Pixel finali"
-            colore_val = self._colore("primario") if is_px else self._colore("testo")
-            tk.Label(self._fr_dettagli, text=valore,
-                     bg=self._colore("superficie"), fg=colore_val,
-                     anchor="w", padx=4, pady=2).grid(
-                row=i, column=1, sticky="w")
+        W = self._cm_to_px(cm_l_tot, dpi)
+        H = self._cm_to_px(cm_h_tot, dpi)
+        self._lbl_pixel.config(text=f"{W} × {H} px")
 
         # Avviso ingrandimento
         self._fr_avviso.grid_forget()
         if self._img_info and W and H:
             iw, ih = self._img_info
-            # Fattore di scala che verrà applicato (stessa logica di esporta())
             if adatta == "contieni":
                 fattore = min(W / iw, H / ih)
             else:
@@ -283,22 +372,62 @@ class SchedaEsporta(ttk.Frame):
                     text=f"L'immagine verrà ingrandita di {fattore:.1f}× "
                          f"— qualità non garantita in stampa.")
                 self._fr_avviso.grid(in_=self._fr_dettagli.master,
-                                     row=self._fr_dettagli.grid_info()["row"] + 1,
+                                     row=self._avviso_row,
                                      column=0, sticky="ew", padx=10, pady=(2, 4))
+
+        # Aggiorna preview risultato
+        self._aggiorna_preview_risultato()
+
+    def _aggiorna_preview_risultato(self):
+        """Genera e mostra nel canvas una preview del risultato con i parametri correnti."""
+        if self._pil_sorgente is None:
+            return
+
+        params = self._leggi_parametri()
+        if params is None:
+            return
+
+        cm_l, cm_h = params["cm"]
+        bordo = params["bordo_cm"]
+        cm_l_tot = cm_l + bordo * 2
+        cm_h_tot = cm_h + bordo * 2
+        dpi = params["dpi"]
+        adatta = params["adatta"]
+
+        W = self._cm_to_px(cm_l_tot, dpi)
+        H = self._cm_to_px(cm_h_tot, dpi)
+
+        img = self._pil_sorgente.copy()
+        iw, ih = img.size
+
+        if adatta == "contieni":
+            scala = min(W / iw, H / ih)
+        else:
+            scala = max(W / iw, H / ih)
+        nuova = (max(1, int(round(iw * scala))), max(1, int(round(ih * scala))))
+
+        # Usa NEAREST per velocità nella preview (immagine potenzialmente grande)
+        img = img.resize(nuova, Image.LANCZOS if max(nuova) < 4000 else Image.NEAREST)
+
+        tela = Image.new("RGB", (W, H), params["sfondo"])
+        tela.paste(img, ((W - img.width) // 2, (H - img.height) // 2))
+
+        self._pil_preview = tela
+        self._mostra_anteprima(tela)
 
     # ------------------------------------------------------------------
     # Nome proposto
     # ------------------------------------------------------------------
 
-    def _nome_proposto(self, path_in, scenario, cfg):
+    def _nome_proposto(self, path_in, scenario, params):
         """Schema: {nome}_{scenario}_{L}x{H}_{dpi}dpi_{profilo}_{AAAAMMGG}.tif"""
         base = os.path.splitext(os.path.basename(path_in))[0]
-        dpi = cfg.get("dpi", 300)
-        cm_l, cm_h = cfg.get("cm", (0, 0))
-        bordo = cfg.get("bordo_cm", 0)
+        dpi = params.get("dpi", 300)
+        cm_l, cm_h = params.get("cm", (0, 0))
+        bordo = params.get("bordo_cm", 0)
         cm_l_tot = cm_l + bordo * 2
         cm_h_tot = cm_h + bordo * 2
-        profilo = cfg.get("profilo", "sRGB")
+        profilo = params.get("profilo", "sRGB")
         today = date.today().strftime("%Y%m%d")
 
         nome = (f"{base}_{scenario}_"
@@ -331,9 +460,13 @@ class SchedaEsporta(ttk.Frame):
             self._app.imposta_stato("Carica prima un'immagine.", "avviso")
             return
 
+        params = self._leggi_parametri()
+        if params is None:
+            self._app.imposta_stato("Parametri non validi.", "avviso")
+            return
+
         scenario = self._scenario_var.get()
-        cfg = self._SCENARI.get(scenario, {})
-        path_proposto = self._nome_proposto(self._path_in, scenario, cfg)
+        path_proposto = self._nome_proposto(self._path_in, scenario, params)
 
         dir_out = os.path.dirname(path_proposto)
         nome_prop = os.path.basename(path_proposto)
@@ -348,13 +481,14 @@ class SchedaEsporta(ttk.Frame):
             return
 
         path_in = self._path_in
+        override = params  # parametri editati dall'utente
         self._app.imposta_stato("Esportazione in corso...", "info")
         self._btn_esporta.config(state="disabled")
 
         def lavora():
             from export_stampa import esporta
             try:
-                info = esporta(path_in, path_out, scenario)
+                info = esporta(path_in, path_out, scenario, override=override)
                 self.after(0, lambda: self._fine_esportazione(info))
             except Exception as e:
                 self.after(0, lambda: self._app.imposta_stato(f"Errore esportazione: {e}", "errore"))

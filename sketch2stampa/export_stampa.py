@@ -63,14 +63,17 @@ def converti_profilo(img, da, a):
     )
 
 
-def esporta(path_in, path_out, scenario):
-    cfg = SCENARI[scenario]
+def esporta(path_in, path_out, scenario, override=None):
+    cfg = {**SCENARI[scenario]}
+    if override:
+        cfg.update(override)
     dpi = cfg["dpi"]
 
     larghezza_cm, altezza_cm = cfg["cm"]
-    if "bordo_cm" in cfg:
-        larghezza_cm += cfg["bordo_cm"] * 2
-        altezza_cm += cfg["bordo_cm"] * 2
+    bordo = cfg.get("bordo_cm", 0)
+    if bordo:
+        larghezza_cm += bordo * 2
+        altezza_cm += bordo * 2
 
     W = cm_to_px(larghezza_cm, dpi)
     H = cm_to_px(altezza_cm, dpi)
