@@ -16,6 +16,7 @@ import log_setup
 from risorse import LOGO_HEADER_B64, LOGO_WATERMARK_B64
 from scheda_normalizza import SchedaNormalizza
 from scheda_esporta import SchedaEsporta
+from scheda_comfyui import SchedaComfyUI
 
 log_setup.configura()
 _log = logging.getLogger("grafite.app")
@@ -73,6 +74,9 @@ class App(tk.Tk):
         self._crea_header()
         self._crea_notebook()
         self._crea_barra_stato()
+
+        # Cleanup alla chiusura
+        self.protocol("WM_DELETE_WINDOW", self._on_chiusura)
 
         # Dark title bar su Windows
         self.update_idletasks()
@@ -283,6 +287,10 @@ class App(tk.Tk):
                                              style="TFrame")
         self._notebook.add(self._scheda_norm, text="  Normalizza  ")
 
+        self._scheda_comfyui = SchedaComfyUI(self._notebook, app=self,
+                                              style="TFrame")
+        self._notebook.add(self._scheda_comfyui, text="  ComfyUI  ")
+
         self._scheda_esp = SchedaEsporta(self._notebook, app=self,
                                           style="TFrame")
         self._notebook.add(self._scheda_esp, text="  Esporta  ")
@@ -325,6 +333,28 @@ class App(tk.Tk):
             testo_barra = msg
 
         self._lbl_stato.config(text=testo_barra, fg=fg)
+
+    # ------------------------------------------------------------------
+    # Accesso schede per comunicazione inter-scheda
+    # ------------------------------------------------------------------
+
+    @property
+    def scheda_esporta(self):
+        return self._scheda_esp
+
+    def seleziona_scheda_esporta(self):
+        self._notebook.select(self._scheda_esp)
+
+    # ------------------------------------------------------------------
+    # Chiusura
+    # ------------------------------------------------------------------
+
+    def _on_chiusura(self):
+        try:
+            self._scheda_comfyui.cleanup()
+        except Exception:
+            _log.exception("Errore durante il cleanup ComfyUI")
+        self.destroy()
 
 
 # ---------------------------------------------------------------------------

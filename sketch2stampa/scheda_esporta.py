@@ -584,6 +584,32 @@ class SchedaEsporta(ttk.Frame):
 
         threading.Thread(target=lavora, daemon=True).start()
 
+    # ------------------------------------------------------------------
+    # API pubblica: caricamento da percorso (usata dalla scheda ComfyUI)
+    # ------------------------------------------------------------------
+
+    def carica_da_percorso(self, path):
+        """Carica l'immagine al percorso dato, come se l'utente l'avesse selezionata."""
+        try:
+            img = Image.open(path).convert("RGB")
+            self._img_info = img.size
+        except Exception as e:
+            _log.exception("Impossibile aprire l'immagine da percorso")
+            self._app.imposta_stato(f"Impossibile aprire: {e}", "errore")
+            return
+
+        self._path_in = path
+        self._pil_sorgente = img
+        self._pil_preview = img
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        nome = os.path.basename(path)
+        w, h = self._img_info
+        self._lbl_img.config(text=f"{nome}\n{w}\u00d7{h} px", fg=self._colore("testo"))
+        self._app.imposta_stato(f"Caricata: {nome} ({w}\u00d7{h} px)")
+        self._on_parametro_cambiato()
+
     def _fine_esportazione(self, info):
         self._btn_esporta.config(state="normal")
         w, h = info["px"]
