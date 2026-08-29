@@ -559,9 +559,10 @@ class SchedaComfyUI(ttk.Frame):
             # 4. Thread lettore stdout
             threading.Thread(target=self._leggi_stdout, args=(proc,), daemon=True).start()
 
-            # 5. Attendi che il server risponda (max 120s)
+            # 5. Attendi che il server risponda (max 300s — installazioni con
+            #    molti nodi custom possono impiegare diversi minuti)
             import time
-            scadenza = time.monotonic() + 120
+            scadenza = time.monotonic() + 300
             while time.monotonic() < scadenza:
                 # Se il processo è morto, inutile aspettare
                 if proc.poll() is not None:
@@ -588,7 +589,7 @@ class SchedaComfyUI(ttk.Frame):
                 ultime = list(self._console_righe)
             testo = "\n".join(ultime[-20:])
             self.after(0, lambda t=testo: self._avvio_fallito(
-                f"Timeout: il server non ha risposto entro 120 secondi.\n\n"
+                f"Timeout: il server non ha risposto entro 300 secondi.\n\n"
                 f"Ultime righe della console:\n{t}"))
 
         threading.Thread(target=lavora, daemon=True).start()
