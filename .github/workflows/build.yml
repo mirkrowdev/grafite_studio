@@ -36,7 +36,15 @@ jobs:
         run: pip install -r sketch2stampa/requirements.txt
 
       - name: Build with PyInstaller
-        run: pyinstaller --onefile --windowed --name grafite sketch2stampa/app.py
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            pyinstaller --onefile --windowed --name grafite \
+              --version-file sketch2stampa/version_info.txt \
+              sketch2stampa/app.py
+          else
+            pyinstaller --onefile --windowed --name grafite sketch2stampa/app.py
+          fi
 
       - name: Rename binary with version
         shell: bash
