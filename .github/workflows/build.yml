@@ -1,10 +1,14 @@
-name: Build Grafite
+name: Build & Release Grafite
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Versione (es. 1.0.0)"
+        required: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -13,8 +17,10 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: grafite-linux
+            binary: grafite
           - os: windows-latest
             artifact: grafite-windows
+            binary: grafite.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -32,8 +38,35 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller --onefile --windowed --name grafite sketch2stampa/app.py
 
+      - name: Rename binary with version
+        shell: bash
+        run: |
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            mv grafite.exe "grafite-${{ inputs.version }}-windows.exe"
+          else
+            mv grafite "grafite-${{ inputs.version }}-linux"
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: dist/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: Grafite v${{ inputs.version }}
+          files: artifacts/**/*
