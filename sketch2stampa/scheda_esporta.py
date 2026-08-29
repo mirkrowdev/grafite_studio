@@ -496,7 +496,8 @@ class SchedaEsporta(ttk.Frame):
                 self.after(0, lambda: self._fine_esportazione(info))
             except Exception as e:
                 _log.exception("Errore durante l'esportazione")
-                self.after(0, lambda: self._app.imposta_stato(f"Errore esportazione: {e}", "errore"))
+                msg = str(e)
+                self.after(0, lambda: self._app.imposta_stato(f"Errore esportazione: {msg}", "errore"))
                 self.after(0, lambda: self._btn_esporta.config(state="normal"))
 
         threading.Thread(target=lavora, daemon=True).start()

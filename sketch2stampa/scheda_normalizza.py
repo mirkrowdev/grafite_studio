@@ -9,6 +9,7 @@ import os
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
+from normalizza import normalizza_array
 
 _log = logging.getLogger("grafite.normalizza")
 
@@ -465,13 +466,13 @@ class SchedaNormalizza(ttk.Frame):
         forza_wb = self._forza_wb.get()
 
         def lavora():
-            from normalizza import normalizza_array
             try:
                 result = normalizza_array(img, angoli, clip=clip, forza_wb=forza_wb)
                 self.after(0, lambda: self._aggiorna_canvas_preview(result))
             except Exception as e:
                 _log.exception("Errore nel ricalcolo anteprima")
-                self.after(0, lambda: self._app.imposta_stato(f"Errore anteprima: {e}", "errore"))
+                msg = str(e)
+                self.after(0, lambda: self._app.imposta_stato(f"Errore anteprima: {msg}", "errore"))
 
         threading.Thread(target=lavora, daemon=True).start()
 
@@ -522,16 +523,15 @@ class SchedaNormalizza(ttk.Frame):
         self._btn_salva.config(state="disabled")
 
         def lavora():
-            from normalizza import normalizza_array
             try:
                 result = normalizza_array(img, angoli_orig, clip=clip, forza_wb=forza_wb)
-                import cv2 as _cv2
-                _cv2.imwrite(path_out, result, [_cv2.IMWRITE_PNG_COMPRESSION, 3])
+                cv2.imwrite(path_out, result, [cv2.IMWRITE_PNG_COMPRESSION, 3])
                 h, w = result.shape[:2]
                 self.after(0, lambda: self._fine_salvataggio(path_out, w, h))
             except Exception as e:
                 _log.exception("Errore nel salvataggio")
-                self.after(0, lambda: self._app.imposta_stato(f"Errore: {e}", "errore"))
+                msg = str(e)
+                self.after(0, lambda: self._app.imposta_stato(f"Errore: {msg}", "errore"))
                 self.after(0, lambda: self._btn_salva.config(state="normal"))
 
         threading.Thread(target=lavora, daemon=True).start()
