@@ -362,10 +362,16 @@ class SchedaComfyUI(ttk.Frame):
 
         root = Path(cartella)
 
-        # Caso 1: python_embeded + ComfyUI/main.py
-        python_exe = root / "python_embeded" / "python.exe"
+        # Caso 1: python_embeded o python_standalone + ComfyUI/main.py
         main_py = root / "ComfyUI" / "main.py"
-        if python_exe.is_file() and main_py.is_file():
+        python_exe = None
+        for nome_dir in ("python_embeded", "python_standalone"):
+            candidato = root / nome_dir / "python.exe"
+            if candidato.is_file():
+                python_exe = candidato
+                break
+
+        if python_exe is not None and main_py.is_file():
             self._percorso_comfyui = str(root)
             self._aggiorna_entry_percorso()
             self._salva_preferenze()
@@ -384,8 +390,9 @@ class SchedaComfyUI(ttk.Frame):
 
         # Rifiuta
         self._app.imposta_stato(
-            "Cartella non valida: cercavo python_embeded\\python.exe + "
-            "ComfyUI\\main.py, oppure un file .bat di avvio "
+            "Cartella non valida: cercavo python_embeded\\python.exe o "
+            "python_standalone\\python.exe + ComfyUI\\main.py, "
+            "oppure un file .bat di avvio "
             "(RUN_Launcher.bat, run_nvidia_gpu.bat, run_cpu.bat)",
             "errore")
 
@@ -502,13 +509,19 @@ class SchedaComfyUI(ttk.Frame):
 
             # 2. Determina modalità di avvio
             root = Path(percorso)
-            python_exe = root / "python_embeded" / "python.exe"
             main_py = root / "ComfyUI" / "main.py"
+
+            python_exe = None
+            for nome_dir in ("python_embeded", "python_standalone"):
+                candidato = root / nome_dir / "python.exe"
+                if candidato.is_file():
+                    python_exe = candidato
+                    break
 
             cmd = None
             avvio_diretto = False
 
-            if python_exe.is_file() and main_py.is_file():
+            if python_exe is not None and main_py.is_file():
                 cmd = [str(python_exe), "-s", str(main_py), "--port", str(porta)]
                 avvio_diretto = True
             else:
