@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.spec
+
+# PyInstaller output
+*.exe
+
+# Profilo ICC generato
+AdobeRGB1998.icc
+
+# File temporanei
+*.tif
+*.tiff
+
+# OS
+.DS_Store
+Thumbs.db
