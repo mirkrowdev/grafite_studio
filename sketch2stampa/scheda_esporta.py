@@ -29,6 +29,11 @@ class SchedaEsporta(ttk.Frame):
         self._tk_img = None       # riferimento PhotoImage (evita GC)
         self._pil_preview = None  # immagine PIL corrente per il canvas
         self._aggiornamento_in_corso = False  # flag anti-ricorsione
+        # Zoom e pan
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        self._pan_start = None
 
         # Variabili editabili per i parametri di export
         self._var_dpi = tk.StringVar()
@@ -218,6 +223,19 @@ class SchedaEsporta(ttk.Frame):
         self._canvas.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
         self._canvas.bind("<Configure>", self._on_canvas_resize)
 
+        # Zoom con rotellina
+        self._canvas.bind("<MouseWheel>", self._on_mousewheel)           # Windows/macOS
+        self._canvas.bind("<Button-4>", self._on_mousewheel_linux_up)    # Linux scroll up
+        self._canvas.bind("<Button-5>", self._on_mousewheel_linux_down)  # Linux scroll down
+
+        # Pan con rotellina (click centrale)
+        self._canvas.bind("<Button-2>", self._on_pan_start)
+        self._canvas.bind("<B2-Motion>", self._on_pan_move)
+        self._canvas.bind("<ButtonRelease-2>", self._on_pan_end)
+
+        # Doppio clic centrale: reset zoom
+        self._canvas.bind("<Double-Button-2>", self._on_zoom_reset)
+
         self._lbl_placeholder = tk.Label(
             self._canvas, text="Carica un'immagine\nper vedere l'anteprima",
             bg=self._colore("sfondo_app"), fg=self._colore("attenuato"),
@@ -233,26 +251,28 @@ class SchedaEsporta(ttk.Frame):
     # ------------------------------------------------------------------
 
     def _mostra_anteprima(self, pil_img):
-        """Visualizza pil_img nel canvas, scalata per adattarsi."""
+        """Visualizza pil_img nel canvas con zoom e pan."""
         cw = self._canvas.winfo_width()
         ch = self._canvas.winfo_height()
         if cw < 10 or ch < 10:
-            # Canvas non ancora renderizzato — riprova al prossimo ciclo
             self.after(50, lambda: self._mostra_anteprima(pil_img))
             return
 
-        # Nasconde placeholder
         self._canvas.itemconfigure("placeholder", state="hidden")
 
-        # Scala mantenendo le proporzioni
         iw, ih = pil_img.size
-        scala = min(cw / iw, ch / ih, 1.0)
+        # Scala base per fit + zoom
+        self._scala_base = min(cw / iw, ch / ih, 1.0)
+        scala = self._scala_base * self._zoom
         nw, nh = max(1, int(iw * scala)), max(1, int(ih * scala))
-        img_rid = pil_img.resize((nw, nh), Image.LANCZOS)
+        resample = Image.LANCZOS if nw < 4000 and nh < 4000 else Image.NEAREST
+        img_rid = pil_img.resize((nw, nh), resample)
 
         self._tk_img = ImageTk.PhotoImage(img_rid)
         self._canvas.delete("preview")
-        self._canvas.create_image(cw // 2, ch // 2, anchor="center",
+        x = cw / 2 + self._pan_x
+        y = ch / 2 + self._pan_y
+        self._canvas.create_image(int(x), int(y), anchor="center",
                                   image=self._tk_img, tags="preview")
 
     def _on_canvas_resize(self, event):
@@ -260,9 +280,68 @@ class SchedaEsporta(ttk.Frame):
         if self._pil_preview is not None:
             self._mostra_anteprima(self._pil_preview)
         else:
-            # Riposiziona il placeholder al centro
             self._canvas.coords("placeholder", event.width // 2, event.height // 2)
             self._canvas.itemconfigure("placeholder", anchor="center", state="normal")
+
+    # ------------------------------------------------------------------
+    # Zoom e Pan
+    # ------------------------------------------------------------------
+
+    def _applica_zoom(self, fattore, cx, cy):
+        if self._pil_preview is None:
+            return
+        cw = self._canvas.winfo_width()
+        ch = self._canvas.winfo_height()
+
+        vecchio = self._zoom
+        nuovo = max(0.2, min(vecchio * fattore, 10.0))
+        if nuovo == vecchio:
+            return
+
+        # Aggiusta pan per mantenere il punto sotto il cursore fisso
+        centro_x = cw / 2 + self._pan_x
+        centro_y = ch / 2 + self._pan_y
+        self._pan_x += (cx - centro_x) * (1 - nuovo / vecchio)
+        self._pan_y += (cy - centro_y) * (1 - nuovo / vecchio)
+        self._zoom = nuovo
+
+        self._mostra_anteprima(self._pil_preview)
+        pct = int(self._zoom * 100)
+        self._app.imposta_stato(f"Zoom: {pct}%  (doppio clic rotellina per resettare)")
+
+    def _on_mousewheel(self, event):
+        fattore = 1.15 if event.delta > 0 else 1.0 / 1.15
+        self._applica_zoom(fattore, event.x, event.y)
+
+    def _on_mousewheel_linux_up(self, event):
+        self._applica_zoom(1.15, event.x, event.y)
+
+    def _on_mousewheel_linux_down(self, event):
+        self._applica_zoom(1.0 / 1.15, event.x, event.y)
+
+    def _on_pan_start(self, event):
+        self._pan_start = (event.x, event.y)
+
+    def _on_pan_move(self, event):
+        if self._pan_start is None or self._pil_preview is None:
+            return
+        dx = event.x - self._pan_start[0]
+        dy = event.y - self._pan_start[1]
+        self._pan_start = (event.x, event.y)
+        self._pan_x += dx
+        self._pan_y += dy
+        self._mostra_anteprima(self._pil_preview)
+
+    def _on_pan_end(self, event):
+        self._pan_start = None
+
+    def _on_zoom_reset(self, event):
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        if self._pil_preview is not None:
+            self._mostra_anteprima(self._pil_preview)
+        self._app.imposta_stato("Zoom resettato")
 
     # ------------------------------------------------------------------
     # Caricamento
@@ -287,6 +366,9 @@ class SchedaEsporta(ttk.Frame):
         self._path_in = path
         self._pil_sorgente = img
         self._pil_preview = img
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
         nome = os.path.basename(path)
         w, h = self._img_info
         self._lbl_img.config(text=f"{nome}\n{w}×{h} px", fg=self._colore("testo"))

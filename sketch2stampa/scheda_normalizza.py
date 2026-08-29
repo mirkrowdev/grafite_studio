@@ -34,9 +34,15 @@ class SchedaNormalizza(ttk.Frame):
         self._tk_img = None         # PhotoImage corrente (tiene in vita il riferimento)
         self._timer_ricalcolo = None
         self._path_orig = None
+        self._ultima_arr = None
         self._forza_wb = tk.DoubleVar(value=self.FORZA_WB_DEFAULT)
         self._clip = tk.DoubleVar(value=self.CLIP_DEFAULT)
         self._etichette_angoli = ["TL", "TR", "BR", "BL"]
+        # Zoom e pan
+        self._zoom = 1.0            # fattore di zoom (1.0 = fit)
+        self._pan_x = 0.0           # offset pan in coordinate canvas
+        self._pan_y = 0.0
+        self._pan_start = None      # punto di inizio pan (tasto destro)
 
         self._crea_layout()
 
@@ -156,6 +162,17 @@ class SchedaNormalizza(ttk.Frame):
         ttk.Separator(pannello, orient="horizontal").grid(
             row=13, column=0, sticky="ew", padx=10, pady=4)
 
+        # Info immagine
+        self._lbl_info_img = tk.Label(pannello, text="",
+                                       bg=self._colore("contenitore"),
+                                       fg=self._colore("attenuato"),
+                                       wraplength=200, justify="left",
+                                       font=("sans-serif", 8))
+        self._lbl_info_img.grid(row=13, column=0, sticky="w", padx=10, pady=(4, 2))
+
+        ttk.Separator(pannello, orient="horizontal").grid(
+            row=14, column=0, sticky="ew", padx=10, pady=4)
+
         # Salva
         self._btn_salva = tk.Button(pannello, text="Salva PNG...",
                                     command=self._salva,
@@ -165,7 +182,7 @@ class SchedaNormalizza(ttk.Frame):
                                     activeforeground="#FFFFFF",
                                     relief="flat", padx=10, pady=8,
                                     cursor="hand2", font=("sans-serif", 10, "bold"))
-        self._btn_salva.grid(row=14, column=0, sticky="ew", padx=10, pady=(8, 12))
+        self._btn_salva.grid(row=15, column=0, sticky="ew", padx=10, pady=(8, 12))
 
         # --- Canvas anteprima ---
         self._canvas = tk.Canvas(self, bg=self.PREVIEW_BG,
@@ -175,6 +192,19 @@ class SchedaNormalizza(ttk.Frame):
         self._canvas.bind("<Button-1>", self._on_canvas_click)
         self._canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self._canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
+
+        # Zoom con rotellina
+        self._canvas.bind("<MouseWheel>", self._on_mousewheel)           # Windows/macOS
+        self._canvas.bind("<Button-4>", self._on_mousewheel_linux_up)    # Linux scroll up
+        self._canvas.bind("<Button-5>", self._on_mousewheel_linux_down)  # Linux scroll down
+
+        # Pan con rotellina (click centrale)
+        self._canvas.bind("<Button-2>", self._on_pan_start)
+        self._canvas.bind("<B2-Motion>", self._on_pan_move)
+        self._canvas.bind("<ButtonRelease-2>", self._on_pan_end)
+
+        # Doppio clic centrale: reset zoom
+        self._canvas.bind("<Double-Button-2>", self._on_zoom_reset)
 
         # Placeholder testo al centro
         self._id_placeholder = self._canvas.create_text(
@@ -211,9 +241,18 @@ class SchedaNormalizza(ttk.Frame):
         self._img_orig = img
         self._angoli = []
         self._drag_idx = None
+        self._ultima_arr = None
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
 
         h, w = img.shape[:2]
-        scala = min(self.MAX_PREVIEW / max(w, h), 1.0)
+
+        # Adatta al canvas E al limite MAX_PREVIEW
+        self.update_idletasks()
+        cw = self._canvas.winfo_width() or 600
+        ch = self._canvas.winfo_height() or 600
+        scala = min(self.MAX_PREVIEW / max(w, h), cw / w, ch / h, 1.0)
         self._scala = scala
         nw, nh = int(w * scala), int(h * scala)
         self._img_preview = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
@@ -221,6 +260,10 @@ class SchedaNormalizza(ttk.Frame):
         self._mostra_immagine(self._img_preview)
         self._btn_salva.config(state="disabled")
         self._aggiorna_etichetta_angoli()
+
+        # Info dimensioni
+        size_mb = os.path.getsize(path) / (1024 * 1024)
+        self._lbl_info_img.config(text=f"Originale: {w}×{h} px  ({size_mb:.1f} MB)")
         self._app.imposta_stato(f"Caricata: {os.path.basename(path)} ({w}×{h} px)")
 
     # ------------------------------------------------------------------
@@ -234,22 +277,34 @@ class SchedaNormalizza(ttk.Frame):
         return ImageTk.PhotoImage(pil)
 
     def _mostra_immagine(self, arr):
-        """Visualizza arr sul canvas, centrato."""
+        """Visualizza arr sul canvas con zoom e pan applicati."""
         self._canvas.delete("immagine")
         self._canvas.delete("overlay")
         self._canvas.delete("placeholder")
 
-        tk_img = self._array_a_tkimg(arr)
-        self._tk_img = tk_img  # mantieni il riferimento
+        ih, iw = arr.shape[:2]
+        z = self._zoom
+
+        if z != 1.0:
+            nw_z = max(1, int(iw * z))
+            nh_z = max(1, int(ih * z))
+            interp = cv2.INTER_AREA if z < 1.0 else cv2.INTER_LINEAR
+            arr_zoomed = cv2.resize(arr, (nw_z, nh_z), interpolation=interp)
+        else:
+            arr_zoomed = arr
+
+        tk_img = self._array_a_tkimg(arr_zoomed)
+        self._tk_img = tk_img
 
         cw = self._canvas.winfo_width() or 600
         ch = self._canvas.winfo_height() or 600
-        x0 = (cw - arr.shape[1]) // 2
-        y0 = (ch - arr.shape[0]) // 2
+        # Centro + pan
+        x0 = (cw - arr_zoomed.shape[1]) / 2 + self._pan_x
+        y0 = (ch - arr_zoomed.shape[0]) / 2 + self._pan_y
         self._img_x0 = x0
         self._img_y0 = y0
 
-        self._canvas.create_image(x0, y0, anchor="nw", image=tk_img, tags="immagine")
+        self._canvas.create_image(int(x0), int(y0), anchor="nw", image=tk_img, tags="immagine")
         self._disegna_overlay()
 
     def _on_canvas_resize(self, event):
@@ -257,20 +312,87 @@ class SchedaNormalizza(ttk.Frame):
         if self._img_orig is None:
             cx, cy = event.width // 2, event.height // 2
             self._canvas.coords(self._id_placeholder, cx, cy)
-        else:
-            # Ridisegna immagine corrente (ricentra)
-            if hasattr(self, "_ultima_arr") and self._ultima_arr is not None:
-                self._mostra_immagine(self._ultima_arr)
+        elif self._ultima_arr is not None:
+            self._mostra_immagine(self._ultima_arr)
+        elif self._img_preview is not None:
+            self._mostra_immagine(self._img_preview)
+
+    # ------------------------------------------------------------------
+    # Zoom e Pan
+    # ------------------------------------------------------------------
+
+    def _applica_zoom(self, fattore, cx, cy):
+        """Zoom centrato sul punto (cx, cy) del canvas."""
+        if self._img_orig is None:
+            return
+
+        vecchio_zoom = self._zoom
+        nuovo_zoom = max(0.2, min(vecchio_zoom * fattore, 10.0))
+        if nuovo_zoom == vecchio_zoom:
+            return
+
+        # Aggiusta il pan per mantenere il punto sotto il cursore fisso
+        self._pan_x = cx - (cx - self._pan_x) * (nuovo_zoom / vecchio_zoom)
+        self._pan_y = cy - (cy - self._pan_y) * (nuovo_zoom / vecchio_zoom)
+        self._zoom = nuovo_zoom
+
+        arr = self._ultima_arr if self._ultima_arr is not None else self._img_preview
+        if arr is not None:
+            self._mostra_immagine(arr)
+
+        # Mostra livello zoom nella barra di stato
+        pct = int(self._zoom * 100)
+        self._app.imposta_stato(f"Zoom: {pct}%  (doppio clic destro per resettare)")
+
+    def _on_mousewheel(self, event):
+        """Zoom con rotellina — Windows/macOS."""
+        fattore = 1.15 if event.delta > 0 else 1.0 / 1.15
+        self._applica_zoom(fattore, event.x, event.y)
+
+    def _on_mousewheel_linux_up(self, event):
+        self._applica_zoom(1.15, event.x, event.y)
+
+    def _on_mousewheel_linux_down(self, event):
+        self._applica_zoom(1.0 / 1.15, event.x, event.y)
+
+    def _on_pan_start(self, event):
+        self._pan_start = (event.x, event.y)
+
+    def _on_pan_move(self, event):
+        if self._pan_start is None or self._img_orig is None:
+            return
+        dx = event.x - self._pan_start[0]
+        dy = event.y - self._pan_start[1]
+        self._pan_start = (event.x, event.y)
+        self._pan_x += dx
+        self._pan_y += dy
+        arr = self._ultima_arr if self._ultima_arr is not None else self._img_preview
+        if arr is not None:
+            self._mostra_immagine(arr)
+
+    def _on_pan_end(self, event):
+        self._pan_start = None
+
+    def _on_zoom_reset(self, event):
+        """Reset zoom e pan a fit."""
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        arr = self._ultima_arr if self._ultima_arr is not None else self._img_preview
+        if arr is not None:
+            self._mostra_immagine(arr)
+        self._app.imposta_stato("Zoom resettato")
 
     # ------------------------------------------------------------------
     # Click / drag angoli
     # ------------------------------------------------------------------
 
     def _canvas_to_preview(self, cx, cy):
-        """Coordinate canvas → coordinate preview."""
+        """Coordinate canvas → coordinate preview (senza zoom)."""
         x0 = getattr(self, "_img_x0", 0)
         y0 = getattr(self, "_img_y0", 0)
-        return cx - x0, cy - y0
+        z = self._zoom
+        return (cx - x0) / z, (cy - y0) / z
 
     def _punto_vicino(self, px, py):
         """Ritorna l'indice del punto angolo più vicino a (px,py) se < soglia."""
@@ -403,13 +525,14 @@ class SchedaNormalizza(ttk.Frame):
 
         x0 = getattr(self, "_img_x0", 0)
         y0 = getattr(self, "_img_y0", 0)
+        z = self._zoom
         r = self.MARKER_RAGGIO
         accento = self._colore("accento")
         etichette = self._etichette_angoli if len(self._angoli) == 4 else [str(i + 1) for i in range(len(self._angoli))]
 
         # Quadrilatero
         if len(self._angoli) >= 2:
-            pts_canvas = [(x0 + ax, y0 + ay) for ax, ay in self._angoli]
+            pts_canvas = [(x0 + ax * z, y0 + ay * z) for ax, ay in self._angoli]
             if len(self._angoli) == 4:
                 self._canvas.create_polygon(pts_canvas, outline=accento,
                                             fill="", width=1.5, tags="overlay")
@@ -420,8 +543,8 @@ class SchedaNormalizza(ttk.Frame):
 
         # Marcatori
         for i, (ax, ay) in enumerate(self._angoli):
-            cx = x0 + ax
-            cy = y0 + ay
+            cx = x0 + ax * z
+            cy = y0 + ay * z
             # Cerchio
             self._canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
                                      outline=accento, fill="", width=2, tags="overlay")
@@ -479,6 +602,12 @@ class SchedaNormalizza(ttk.Frame):
     def _aggiorna_canvas_preview(self, arr):
         self._ultima_arr = arr
         self._mostra_immagine(arr)
+        # Mostra dimensioni stimate del risultato (scala → originale)
+        h_prev, w_prev = arr.shape[:2]
+        w_orig = int(w_prev / self._scala)
+        h_orig = int(h_prev / self._scala)
+        self._lbl_info_img.config(
+            text=f"Risultato stimato: {w_orig}×{h_orig} px")
 
     # ------------------------------------------------------------------
     # Ripristina parametri
@@ -538,4 +667,5 @@ class SchedaNormalizza(ttk.Frame):
 
     def _fine_salvataggio(self, path_out, w, h):
         self._btn_salva.config(state="normal")
+        self._lbl_info_img.config(text=f"Salvato: {w}×{h} px")
         self._app.imposta_stato(f"Salvato: {path_out} ({w}×{h} px)")
